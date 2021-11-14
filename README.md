@@ -2,9 +2,13 @@
 Simple hex editor    
 ESC - normal mode  
 i - insert mode    
+a - ASCII mode  
 In normal mode:  
 h, j, k, l - left, down, up, right  
 q - quit  
-s - save    
-In insert mode:  
-Backspace - return to previous byte
+w - save    
+@[offset in hex] - jump to offset  
+In other modes:  
+Backspace - return to previous byte  
+u - undo last change  
+r - cancel undo :/
