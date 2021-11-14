@@ -288,7 +288,8 @@ void Undo()
 	if (indexChangeLog == -1)
 		return;
 
-	CursorJumpTo(changeLog[indexChangeLog].offset);
+	address = changeLog[indexChangeLog].offset;
+	CursorJumpTo();
 
 	lastUndo.offset = changeLog[indexChangeLog].offset;
 	lastUndo.byte = fileBuffer[changeLog[indexChangeLog].offset];
@@ -302,7 +303,8 @@ void Redo()
 	if (lastUndo.offset == -1)
 		return;
 
-	CursorJumpTo(lastUndo.offset);
+	address = lastUndo.offset;
+	CursorJumpTo();
 
 	if (indexChangeLog == ALLOC_SIZE_CL - 1)
 	{
