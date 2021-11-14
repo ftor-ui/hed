@@ -11,12 +11,13 @@
 
 #define WIDTH  16
 #define HEIGHT 20
+#define ALLOC_SIZE_CL 50
 
 FILE *file = NULL;
 char unsigned *fileBuffer = NULL;
 int long fileSize = 0;
 char unsigned pressKey = '\0';
-int short unsigned mode = 0; // 0 - normal mode, 1 - insert mode
+int short unsigned mode = 0; // 0 - normal mode, 1 - insert mode, 2 - ascii mode
 int short unsigned quit = 1; // 1 - don't quit, 0 - quit
 int long curX = 0;
 int long curY = 0;
@@ -27,12 +28,35 @@ int short unsigned height = HEIGHT;
 int long borderTop = 0;
 int long borderBottom = HEIGHT - 1;
 
+// For CursorJumpTo() function
+int long address = 0;
+char address_str[9] = {0};
+
+// For ChangeLog(), Undo(), Redo() functions
+struct _changeLog_t
+{
+	long int offset;
+	char unsigned byte;
+} changeLog[ALLOC_SIZE_CL] = {0};
+int long indexChangeLog = -1; // -1 - mean nothing changes
+struct _changeLog_t lastUndo = {-1};
+
 void OpenFile(int const argc, char const **argv);
 void InitScreen();
 void GetKey();
 void KeyLogic();
 void WriteOut();
 void WriteIn();
+void ChangeLog();
+void Undo();
+void Redo();
+
+// SMART Move cursor
+void CursorUp();
+void CursorDown();
+void CursorLeft();
+void CursorRight();
+void CursorJumpTo();
 
 #ifdef __linux__
 char unsigned getch();
@@ -79,88 +103,75 @@ void OpenFile(int const argc, char const **argv)
 
 void GetKey()
 {
-	switch (mode)
-	{
-		case 0:
-			pressKey = getch();
-			break;
-		case 1:
-			pressKey = getch();
-			break;
-	}
+	pressKey = getch();
 }
 
 void KeyLogic()
 {
-	switch (pressKey)
+	if (mode != 0)
 	{
-		case 27:
-			mode = 0;
+		if (pressKey == 27)
+		{
 			digit = 1;
+			mode = 0;
 			return;
-		case 'i':
-			mode = 1;
+		}
+
+		else if (pressKey == 8)
+		{
+			CursorLeft();	
+			return;
+		}
+
+		if (curY * width + curX > fileSize)
 			return;
 	}
 
 	if (mode == 0)
 	switch (pressKey)
 	{
+		case 'i':
+			mode = 1;
+			return;
+		case 'a':
+			mode = 2;
+			return;
 		case 'q':
 			quit = 0;
 			return;
-		case 's':
+		case 'w':
 			WriteIn();
 			return;
+		case 'u':
+			Undo();
+			return;
+		case 'r':
+			Redo();
+			return;
 		case 'h':
-			curX = curX == 0 ? 0 : --curX;
+			CursorLeft();
+			return;
+		case '@':
+			printf("@");
+			scanf("%8s", address_str);
+			address = strtol(address_str, NULL, 16);
+			CursorJumpTo();
 			return;
 		case 'j':
-			curY = curY == fileSize / width  ? curY : ++curY;
-			if (borderBottom != fileSize / width && curY > borderBottom)
-			{
-				offset += width;
-				borderTop++;
-				borderBottom++;
-			}
+			CursorDown();	
 			return;
 		case 'k':
-			curY = curY == 0 ? 0 : --curY;
-			if (borderTop != 0 && curY < borderTop)
-			{
-				offset -= width;
-				borderTop--;
-				borderBottom--;
-			}
+			CursorUp();	
 			return;
 		case 'l':
-			curX = curX == width - 1 ? curX : ++curX;
+			CursorRight();
 			return;
 	}
 
-	else
+	else if (mode == 1)
 	{
-		if (pressKey == 8)
-		{
-			if (curX == 0)
-			{
-				curX = curY > 0 ? width - 1 : curX; 
-				curY = curY > 0 ? --curY : curY;
-			}
-			else
-				curX--;
-			
-			if (borderTop != 0 && curY < borderTop)
-			{
-				offset -= 16;
-				borderTop--;
-				borderBottom--;
-			}
+		ChangeLog();
 
-			return;
-		}
-		if (curY * width + curX > fileSize)
-			return;
 		if (digit == 1)
 		{
 			fileBuffer[curY * width + curX] %= width;
@@ -173,16 +184,17 @@ void KeyLogic()
 			fileBuffer[curY * width + curX] += strtol(&pressKey, NULL, 16);
 			digit = 1;
 
-			curY = curX == width - 1 ? ++curY : curY;
-			curX = curX == width - 1 ? 0 : ++curX;
-			curY = curY > fileSize / width ? --curY : curY;
-			if (borderBottom != fileSize / width && curY > borderBottom)
-			{
-				offset += width;
-				borderTop++;
-				borderBottom++;
-			}
+			CursorRight();	
 		}
+	}
+
+	else if (mode == 2)
+	{
+		ChangeLog();
+
+		fileBuffer[curY * width + curX] = pressKey;
+
+		CursorRight();	
 	}
 }
 
@@ -195,14 +207,20 @@ void WriteOut()
 	system("clear");
 	#endif
 
+	// The Super Fucking Awesome Identation
+	for (int i = 0; i < 5 * width / 2; i++)
+		printf(" ");
+
 	switch (mode)
 	{
 		case 0:
-			printf("                                       NORMAL MODE\n");
+			printf("NORMAL MODE\n");
 			break;
 		case 1:
-			printf("                                       INSERT MODE\n");
+			printf("INSERT MODE\n");
 			break;
+		case 2:
+			printf("ASCII MODE\n");
 	}
 
 	for (int long i = 0; i < width * height; i++)
@@ -237,8 +255,6 @@ void WriteOut()
 			printf("\n");
 		}
 	}
-
-	printf("                           q - quit, s - save; (In normal mode)");
 }
 
 void WriteIn()
@@ -246,6 +262,130 @@ void WriteIn()
 	fseek(file, 0, SEEK_SET);
 	for (int i = 0; i < fileSize; i++)
 		fputc(fileBuffer[i], file);
+}
+
+void ChangeLog()
+{
+	if (indexChangeLog == ALLOC_SIZE_CL - 1)
+	{
+		for (int i = 0; i < ALLOC_SIZE_CL - 1; i++)
+			changeLog[i] = changeLog[i + 1];
+		changeLog[indexChangeLog].offset = curY * width + curX;
+		changeLog[indexChangeLog].byte = fileBuffer[curY * width + curX];
+
+		return;
+	}
+
+	changeLog[indexChangeLog + 1].offset = curY * width + curX;
+	changeLog[indexChangeLog + 1].byte = fileBuffer[curY * width + curX];
+	indexChangeLog++;
+
+	lastUndo.offset = -1;
+}
+
+void Undo()
+{
+	if (indexChangeLog == -1)
+		return;
+
+	CursorJumpTo(changeLog[indexChangeLog].offset);
+
+	lastUndo.offset = changeLog[indexChangeLog].offset;
+	lastUndo.byte = fileBuffer[changeLog[indexChangeLog].offset];
+
+	fileBuffer[changeLog[indexChangeLog].offset] = changeLog[indexChangeLog].byte;
+	indexChangeLog--;
+}
+
+void Redo()
+{
+	if (lastUndo.offset == -1)
+		return;
+
+	CursorJumpTo(lastUndo.offset);
+
+	if (indexChangeLog == ALLOC_SIZE_CL - 1)
+	{
+		for (int i = 0; i < ALLOC_SIZE_CL - 1; i++)
+			changeLog[i] = changeLog[i + 1];
+		changeLog[indexChangeLog].offset = lastUndo.offset;
+		changeLog[indexChangeLog].byte = fileBuffer[lastUndo.offset];
+		fileBuffer[lastUndo.offset] = lastUndo.byte;
+		return;
+	}
+	changeLog[indexChangeLog + 1].offset = lastUndo.offset;
+	changeLog[indexChangeLog + 1].byte = fileBuffer[lastUndo.offset];
+	indexChangeLog++;
+	fileBuffer[lastUndo.offset] = lastUndo.byte;
+
+	lastUndo.offset = -1;
+}
+
+void CursorUp()
+{
+	curY = curY == 0 ? 0 : --curY;
+	if (borderTop != 0 && curY < borderTop)
+	{
+		offset -= width;
+		borderTop--;
+		borderBottom--;
+	}
+}
+
+void CursorDown()
+{
+	curY = curY == fileSize / width  ? curY : ++curY;
+	if (borderBottom != fileSize / width && curY > borderBottom)
+	{
+		offset += width;
+		borderTop++;
+		borderBottom++;
+	}
+
+}
+
+void CursorLeft()
+{
+	if (curX == 0)
+	{
+		curX = curY > 0 ? width - 1 : curX; 
+		curY = curY > 0 ? --curY : curY;
+	}
+	else
+		curX--;
+	
+	if (borderTop != 0 && curY < borderTop)
+	{
+		offset -= 16;
+		borderTop--;
+		borderBottom--;
+	}
+}
+
+void CursorRight()
+{
+	curY = curX == width - 1 ? ++curY : curY;
+	curX = curX == width - 1 ? 0 : ++curX;
+	curY = curY > fileSize / width ? --curY : curY;
+	if (borderBottom != fileSize / width && curY > borderBottom)
+	{
+		offset += width;
+		borderTop++;
+		borderBottom++;
+	}
+}
+
+void CursorJumpTo()
+{
+	if (address > fileSize - 1 || address < 0)
+		return;
+	
+	curY = address / width;
+	curX = address % width;
+	offset = curY * width;
+
+	borderTop = curY;
+	borderBottom = curY + height - 1;
 }
 
 #ifdef __linux__
