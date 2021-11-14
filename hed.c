@@ -11,13 +11,14 @@
 
 #define WIDTH  16
 #define HEIGHT 20
+#define ALLOC_SIZE_FW 50
 #define ALLOC_SIZE_CL 50
 
 FILE *file = NULL;
 char unsigned *fileBuffer = NULL;
 int long fileSize = 0;
 char unsigned pressKey = '\0';
-int short unsigned mode = 0; // 0 - normal mode, 1 - insert mode, 2 - ascii mode
+int short unsigned mode = 0; // 0 - normal mode, 1 - hex mode, 2 - ascii mode
 int short unsigned quit = 1; // 1 - don't quit, 0 - quit
 int long curX = 0;
 int long curY = 0;
@@ -28,18 +29,23 @@ int short unsigned height = HEIGHT;
 int long borderTop = 0;
 int long borderBottom = HEIGHT - 1;
 
-// For CursorJumpTo() function
-int long address = 0;
-char address_str[9] = {0};
-
 // For ChangeLog(), Undo(), Redo() functions
-struct _changeLog_t
+struct _byte_t
 {
 	long int offset;
 	char unsigned byte;
 } changeLog[ALLOC_SIZE_CL] = {0};
 int long indexChangeLog = -1; // -1 - mean nothing changes
-struct _changeLog_t lastUndo = {-1};
+struct _byte_t lastUndo = {-1};
+
+// For FindUp(), FindDown() functions
+char word[ALLOC_SIZE_FW + 1] = {0};
+int long wordLength = 0;
+int long findWord = {-1};
+
+// For CursorJumpTo() function
+int long address = 0;
+char address_str[9] = {0};
 
 void OpenFile(int const argc, char const **argv);
 void InitScreen();
@@ -57,6 +63,8 @@ void CursorDown();
 void CursorLeft();
 void CursorRight();
 void CursorJumpTo();
+void FindUp();
+void FindDown();
 
 #ifdef __linux__
 char unsigned getch();
@@ -130,7 +138,7 @@ void KeyLogic()
 	if (mode == 0)
 	switch (pressKey)
 	{
-		case 'i':
+		case 's':
 			mode = 1;
 			return;
 		case 'a':
@@ -148,14 +156,20 @@ void KeyLogic()
 		case 'r':
 			Redo();
 			return;
-		case 'h':
-			CursorLeft();
-			return;
 		case '@':
 			printf("@");
 			scanf("%8s", address_str);
 			address = strtol(address_str, NULL, 16);
 			CursorJumpTo();
+			return;
+		case '?':
+			FindUp();
+			return;
+		case '/':
+			FindDown();
+			return;
+		case 'h':
+			CursorLeft();
 			return;
 		case 'j':
 			CursorDown();	
@@ -217,7 +231,7 @@ void WriteOut()
 			printf("NORMAL MODE\n");
 			break;
 		case 1:
-			printf("INSERT MODE\n");
+			printf(" HEX MODE\n");
 			break;
 		case 2:
 			printf("ASCII MODE\n");
@@ -321,6 +335,84 @@ void Redo()
 	fileBuffer[lastUndo.offset] = lastUndo.byte;
 
 	lastUndo.offset = -1;
+}
+
+void FindUp()
+{
+	printf("?");
+	scanf("%50s", word);
+	for (int long i = 0; word[i] != '\0'; i++)
+		wordLength++;
+	
+	if (wordLength > curY * width + curX || wordLength > fileSize)
+		return;
+
+	for (int long i = curY * width + curX - wordLength; i >= 0; i--)
+	{
+		for (int long k = 0; k < wordLength; k++)
+		{
+			if (word[k] != fileBuffer[i + k])
+				break;
+
+			if (k == wordLength - 1)
+			{
+				findWord = i;
+
+				address = findWord;
+				CursorJumpTo();
+				WriteOut();
+				printf("?%s", word);
+
+				pressKey = 0;
+				while (pressKey != 10 && pressKey != 13 && pressKey != 27)
+					GetKey();
+
+				if (pressKey == 27)
+					return;
+			}
+		}
+	}		
+
+	wordLength = 0;
+}
+
+void FindDown()
+{
+	printf("/");
+	scanf("%50s", word);
+	for (int long i = 0; word[i] != '\0'; i++)
+		wordLength++;
+
+	if (wordLength > fileSize - (curY * width + curX))
+		return;
+
+	for (int long i = curY * width + curX; i < fileSize - wordLength; i++)
+	{
+		for (int long k = 0; k < wordLength; k++)
+		{
+			if (word[k] != fileBuffer[i + k])
+				break;
+
+			if (k == wordLength - 1)
+			{
+				findWord = i;
+
+				address = findWord;
+				CursorJumpTo();
+				WriteOut();
+				printf("/%s", word);
+
+				pressKey = 0;
+				while (pressKey != 10 && pressKey != 13 && pressKey != 27)
+					GetKey();
+
+				if (pressKey == 27)
+					return;
+			}
+		}
+	}
+
+	wordLength = 0;
 }
 
 void CursorUp()
