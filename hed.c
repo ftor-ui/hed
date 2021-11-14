@@ -341,6 +341,8 @@ void FindUp()
 {
 	printf("?");
 	scanf("%50s", word);
+
+	wordLength = 0;
 	for (int long i = 0; word[i] != '\0'; i++)
 		wordLength++;
 	
@@ -372,14 +374,14 @@ void FindUp()
 			}
 		}
 	}		
-
-	wordLength = 0;
 }
 
 void FindDown()
 {
 	printf("/");
 	scanf("%50s", word);
+
+	wordLength = 0;
 	for (int long i = 0; word[i] != '\0'; i++)
 		wordLength++;
 
@@ -411,8 +413,6 @@ void FindDown()
 			}
 		}
 	}
-
-	wordLength = 0;
 }
 
 void CursorUp()
