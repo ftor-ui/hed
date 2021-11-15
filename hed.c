@@ -15,6 +15,7 @@
 #define ALLOC_SIZE_CL 50
 
 FILE *file = NULL;
+char *filePath = NULL;
 char unsigned *fileBuffer = NULL;
 int long fileSize = 0;
 char unsigned pressKey = '\0';
@@ -34,6 +35,7 @@ struct _byte_t
 {
 	long int offset;
 	char unsigned byte;
+	int cycleOffset;
 } changeLog[ALLOC_SIZE_CL] = {0};
 int long indexChangeLog = -1; // -1 - mean nothing changes
 struct _byte_t lastUndo = {-1};
@@ -56,6 +58,8 @@ void WriteIn();
 void ChangeLog();
 void Undo();
 void Redo();
+void ByteDelete();
+void ByteInsert();
 
 // SMART Move cursor
 void CursorUp();
@@ -93,10 +97,16 @@ void OpenFile(int const argc, char const **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	file = fopen(argv[1], "r+b");
+	filePath = (char *)malloc(sizeof(char) * strlen(argv[1]) + 1);
+	strcpy(filePath, argv[1]);
+	file = fopen(filePath, "r+b");
+
+	if (file == NULL)
+		file = fopen(filePath, "w+b");
+
 	if (file == NULL)
 	{
-		printf("ERROR: File cannot be open or file doesn't exist\n");
+		printf("ERROR: File cannot be open or created\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -107,6 +117,8 @@ void OpenFile(int const argc, char const **argv)
 	for (long int i = 0; i < fileSize; i++)
 		if ((fileBuffer[i] = fgetc(file)) == EOF)
 			break;
+
+	fclose(file);
 }
 
 void GetKey()
@@ -126,8 +138,19 @@ void KeyLogic()
 		}
 
 		else if (pressKey == 8)
-		{
-			CursorLeft();	
+		{	
+			if (mode == 4)
+			{
+				if (curY * width + curX == 0)
+					return;
+				CursorLeft();
+				address = curY * width + curX;
+				ByteDelete();
+			}
+
+			else
+				CursorLeft();
+
 			return;
 		}
 
@@ -143,6 +166,32 @@ void KeyLogic()
 			return;
 		case 'a':
 			mode = 2;
+			return;
+		case 'i':
+			printf("i");
+			while (pressKey != 's' && pressKey != 'a' && pressKey != 27)
+				GetKey();
+
+			if (curY * width + curX > fileSize)
+			{
+				address = fileSize;
+				CursorJumpTo();
+			}
+
+			switch (pressKey)
+			{
+				case 's':
+					mode = 3;
+					address = curY * width + curX;
+					ByteInsert();
+					break;
+				case 'a':
+					mode = 4;
+					address = curY * width + curX;
+					ByteInsert();
+					break;
+			}
+
 			return;
 		case 'q':
 			quit = 0;
@@ -168,6 +217,33 @@ void KeyLogic()
 		case '/':
 			FindDown();
 			return;
+		case 'g':
+			printf("g");
+			pressKey = 0;
+			while (pressKey != 'g' && pressKey != 27)
+				GetKey();
+			if (pressKey == 'g')
+			{
+				address = 0;
+				CursorJumpTo();
+			}
+			return;
+		case 'G':
+			address = fileSize - 1;
+			CursorJumpTo();
+			return;
+		case '$':
+			address = curY * width + width - 1;
+			CursorJumpTo();
+			return;
+		case 'x':
+			address = curY * width + curX;
+			ByteDelete();
+			return;
+		case 'b':
+			address = curY * width + curX;
+			ByteInsert();
+			return;
 		case 'h':
 			CursorLeft();
 			return;
@@ -182,8 +258,8 @@ void KeyLogic()
 			return;
 	}
 
-	else if (mode == 1)
-	{
+	else if (mode == 1 || mode == 3)
+	{	
 		ChangeLog();
 
 		if (digit == 1)
@@ -200,15 +276,28 @@ void KeyLogic()
 
 			CursorRight();	
 		}
+
+		if (mode == 3 && digit == 1)
+		{
+			address = curY * width + curX;
+			ByteInsert();
+		}
+
 	}
 
-	else if (mode == 2)
-	{
+	else if (mode == 2 || mode == 4)
+	{	
 		ChangeLog();
 
 		fileBuffer[curY * width + curX] = pressKey;
 
 		CursorRight();	
+
+		if (mode == 4)
+		{
+			address = curY * width + curX;
+			ByteInsert();
+		}
 	}
 }
 
@@ -235,6 +324,12 @@ void WriteOut()
 			break;
 		case 2:
 			printf("ASCII MODE\n");
+			break;
+		case 3:
+			printf("INS HEX MODE\n");
+			break;
+		case 4:
+			printf("INS ASCII MODE\n");
 	}
 
 	for (int long i = 0; i < width * height; i++)
@@ -273,9 +368,10 @@ void WriteOut()
 
 void WriteIn()
 {
-	fseek(file, 0, SEEK_SET);
+	file = fopen(filePath, "w+b");
 	for (int i = 0; i < fileSize; i++)
 		fputc(fileBuffer[i], file);
+	fclose(file);
 }
 
 void ChangeLog()
@@ -286,12 +382,14 @@ void ChangeLog()
 			changeLog[i] = changeLog[i + 1];
 		changeLog[indexChangeLog].offset = curY * width + curX;
 		changeLog[indexChangeLog].byte = fileBuffer[curY * width + curX];
+		changeLog[indexChangeLog].cycleOffset = 0;
 
 		return;
 	}
 
 	changeLog[indexChangeLog + 1].offset = curY * width + curX;
 	changeLog[indexChangeLog + 1].byte = fileBuffer[curY * width + curX];
+	changeLog[indexChangeLog + 1].cycleOffset = 0;
 	indexChangeLog++;
 
 	lastUndo.offset = -1;
@@ -307,8 +405,29 @@ void Undo()
 
 	lastUndo.offset = changeLog[indexChangeLog].offset;
 	lastUndo.byte = fileBuffer[changeLog[indexChangeLog].offset];
+	lastUndo.cycleOffset = changeLog[indexChangeLog].cycleOffset * (-1);
 
-	fileBuffer[changeLog[indexChangeLog].offset] = changeLog[indexChangeLog].byte;
+	if (changeLog[indexChangeLog].cycleOffset == 1)
+	{
+		for (int long i = address; i < fileSize - 1; i++)
+			fileBuffer[i] = fileBuffer[i + 1];
+
+		fileSize--;
+		fileBuffer = (char unsigned *)realloc((void *)fileBuffer, fileSize);
+	}
+
+	else if (changeLog[indexChangeLog].cycleOffset == -1)
+	{	
+		fileSize++;
+		fileBuffer = (char unsigned *)realloc((void*)fileBuffer, fileSize);
+		for (int long i = fileSize - 1; i > address; i--)
+			fileBuffer[i] = fileBuffer[i - 1];
+		fileBuffer[changeLog[indexChangeLog].offset] = changeLog[indexChangeLog].byte;
+	}
+
+	else
+		fileBuffer[changeLog[indexChangeLog].offset] = changeLog[indexChangeLog].byte;
+
 	indexChangeLog--;
 }
 
@@ -326,15 +445,94 @@ void Redo()
 			changeLog[i] = changeLog[i + 1];
 		changeLog[indexChangeLog].offset = lastUndo.offset;
 		changeLog[indexChangeLog].byte = fileBuffer[lastUndo.offset];
-		fileBuffer[lastUndo.offset] = lastUndo.byte;
+		changeLog[indexChangeLog].cycleOffset = lastUndo.cycleOffset * (-1);
+
+		if (lastUndo.cycleOffset == 1)
+		{
+			for (int long i = address; i < fileSize - 1; i++)
+				fileBuffer[i] = fileBuffer[i + 1];
+
+			fileSize--;
+			fileBuffer = (char unsigned *)realloc((void *)fileBuffer, fileSize);
+		}
+
+		else if (lastUndo.cycleOffset == -1)
+		{
+			fileSize++;
+			fileBuffer = (char unsigned *)realloc((void*)fileBuffer, fileSize);
+			for (int long i = fileSize - 1; i > address; i--)
+				fileBuffer[i] = fileBuffer[i - 1];
+			fileBuffer[address] = lastUndo.byte;
+		}
+
+		else
+			fileBuffer[lastUndo.offset] = lastUndo.byte;
+
 		return;
 	}
 	changeLog[indexChangeLog + 1].offset = lastUndo.offset;
 	changeLog[indexChangeLog + 1].byte = fileBuffer[lastUndo.offset];
+	changeLog[indexChangeLog + 1].cycleOffset = lastUndo.cycleOffset * (-1);
 	indexChangeLog++;
-	fileBuffer[lastUndo.offset] = lastUndo.byte;
+	
+	if (lastUndo.cycleOffset == 1)
+	{
+		for (int long i = address; i < fileSize - 1; i++)
+			fileBuffer[i] = fileBuffer[i + 1];
+
+		fileSize--;
+		fileBuffer = (char unsigned *)realloc((void *)fileBuffer, fileSize);
+	}
+
+	else if (lastUndo.cycleOffset == -1)
+	{
+		fileSize++;
+		fileBuffer = (char unsigned *)realloc((void*)fileBuffer, fileSize);
+		for (int long i = fileSize - 1; i > address; i--)
+			fileBuffer[i] = fileBuffer[i - 1];
+		fileBuffer[address] = lastUndo.byte;
+	}
+
+	else
+		fileBuffer[lastUndo.offset] = lastUndo.byte;
 
 	lastUndo.offset = -1;
+}
+
+void ByteDelete()
+{
+	if (address > fileSize - 1)
+		return;
+
+	ChangeLog();
+	for (int long i = address; i < fileSize - 1; i++)
+	{
+		changeLog[indexChangeLog].cycleOffset = -1;
+		fileBuffer[i] = fileBuffer[i + 1];
+	}
+
+	fileSize--;
+	fileBuffer = (char unsigned *)realloc((void *)fileBuffer, fileSize);
+
+	if (address == fileSize)
+		CursorLeft();
+}
+
+void ByteInsert()
+{
+	if (address > fileSize)
+		return;
+
+	if (address != fileSize)
+		ChangeLog();
+	fileSize++;
+	fileBuffer = (char unsigned *)realloc((void*)fileBuffer, fileSize);
+	for (int long i = fileSize - 1; i > address; i--)
+	{
+		changeLog[indexChangeLog].cycleOffset = 1;
+		fileBuffer[i] = fileBuffer[i - 1];
+	}
+	fileBuffer[address] = 0;
 }
 
 void FindUp()
@@ -471,7 +669,7 @@ void CursorRight()
 
 void CursorJumpTo()
 {
-	if (address > fileSize - 1 || address < 0)
+	if (address > fileSize || address < 0)
 		return;
 	
 	curY = address / width;
