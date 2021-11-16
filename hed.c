@@ -139,13 +139,11 @@ void KeyLogic()
 
 		else if (pressKey == 8)
 		{	
-			if (mode == 4)
+			if (mode == 4 || mode == 3)
 			{
-				if (curY * width + curX == 0)
-					return;
-				CursorLeft();
-				address = curY * width + curX;
+				address = curY * width + curX - 1;
 				ByteDelete();
+				CursorLeft();
 			}
 
 			else
@@ -182,13 +180,9 @@ void KeyLogic()
 			{
 				case 's':
 					mode = 3;
-					address = curY * width + curX;
-					ByteInsert();
 					break;
 				case 'a':
 					mode = 4;
-					address = curY * width + curX;
-					ByteInsert();
 					break;
 			}
 
@@ -260,6 +254,12 @@ void KeyLogic()
 
 	else if (mode == 1 || mode == 3)
 	{	
+		if (mode == 3 && digit == 1)
+		{
+			address = curY * width + curX;
+			ByteInsert();
+		}
+
 		ChangeLog();
 
 		if (digit == 1)
@@ -275,29 +275,22 @@ void KeyLogic()
 			digit = 1;
 
 			CursorRight();	
-		}
-
-		if (mode == 3 && digit == 1)
-		{
-			address = curY * width + curX;
-			ByteInsert();
-		}
-
+		}	
 	}
 
 	else if (mode == 2 || mode == 4)
 	{	
-		ChangeLog();
-
-		fileBuffer[curY * width + curX] = pressKey;
-
-		CursorRight();	
-
 		if (mode == 4)
 		{
 			address = curY * width + curX;
 			ByteInsert();
 		}
+
+		ChangeLog();
+
+		fileBuffer[curY * width + curX] = pressKey;
+
+		CursorRight();	
 	}
 }
 
@@ -512,10 +505,8 @@ void ByteDelete()
 	}
 
 	fileSize--;
-	fileBuffer = (char unsigned *)realloc((void *)fileBuffer, fileSize);
-
-	if (address == fileSize)
-		CursorLeft();
+	if (fileSize != 0 && fileSize != 1)
+		fileBuffer = (char unsigned *)realloc((void *)fileBuffer, fileSize);
 }
 
 void ByteInsert()
